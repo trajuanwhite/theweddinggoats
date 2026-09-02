@@ -3,6 +3,14 @@
     {
       "source": "/detailsform",
       "destination": "/detailsform.html"
+    },
+    {
+      "source": "/inquiry",
+      "destination": "/inquiry.html"
+    },
+    {
+      "source": "/films",
+      "destination": "/films.html"
     }
   ]
 }
