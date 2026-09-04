@@ -6,7 +6,7 @@ export default function handler(req, res) {
 
   const applicationId = process.env.SQUARE_APPLICATION_ID;
   const locationId = process.env.SQUARE_LOCATION_ID;
-  const environment = (process.env.SQUARE_ENVIRONMENT || 'production').toLowerCase();
+  const environment = (process.env.SQUARE_ENVIRONMENT || 'sandbox').toLowerCase();
 
   if (!applicationId || !locationId) {
     return res.status(503).json({
@@ -19,6 +19,6 @@ export default function handler(req, res) {
     ok: true,
     applicationId,
     locationId,
-    environment: environment === 'sandbox' ? 'sandbox' : 'production'
+    environment: environment === 'production' ? 'production' : 'sandbox'
   });
 }
