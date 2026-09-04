@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 
 const TAX_RATE = 0.0825;
 const CONTRACT_VERSION = 'TWG-2026-09-03-v1';
-const LIVE_TEST_KEY = 'twg-live-20260903-7d4f9c2a';
 const PACKAGES = {
   alpine: { name: 'The Alpine', total: 300000, retainer: 90000 },
   savannah: { name: 'The Savannah', total: 360000, retainer: 108000 },
@@ -43,9 +42,8 @@ export default async function handler(req, res) {
   const contractAccepted = body.contractAccepted === true;
   const contractVersion = String(body.contractVersion || '').trim();
   const acceptedAt = String(body.acceptedAt || '').trim().slice(0, 60);
-  const isLiveTest = environment === 'production' && packageKey === 'live_test' && body.liveTestKey === LIVE_TEST_KEY;
 
-  const selected = isLiveTest ? { name: 'Square Production Test', total: 100, retainer: 100 } : PACKAGES[packageKey];
+  const selected = PACKAGES[packageKey];
   if (!sourceId || !selected) {
     return res.status(400).json({ ok: false, error: 'Missing or invalid payment information.' });
   }
@@ -53,19 +51,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: 'Please review and electronically sign the current Wedding Videography Agreement before paying.' });
   }
 
-  const tax = isLiveTest ? 0 : Math.round(selected.retainer * TAX_RATE);
-  const amountDue = isLiveTest ? 100 : selected.retainer + tax;
+  const tax = Math.round(selected.retainer * TAX_RATE);
+  const amountDue = selected.retainer + tax;
 
   const endpoint = environment === 'production'
     ? 'https://connect.squareup.com/v2/payments'
     : 'https://connect.squareupsandbox.com/v2/payments';
 
-  const noteParts = isLiveTest ? [
-    'TEMPORARY $1 LIVE WEBSITE PAYMENT TEST — not a wedding booking',
-    `Tester: ${name}`,
-    `Contract ${CONTRACT_VERSION} test acceptance by ${signature}`,
-    acceptedAt && `Accepted ${acceptedAt}`
-  ].filter(Boolean) : [
+  const noteParts = [
     `${selected.name} 30% wedding retainer + 8.25% sales tax`,
     `Client: ${name}`,
     partnerName && `Partner: ${partnerName}`,
@@ -114,9 +107,7 @@ export default async function handler(req, res) {
       contractVersion: CONTRACT_VERSION,
       acceptedAt: signedAt,
       paymentId: data.payment.id,
-      squareReceiptUrl: data.payment.receipt_url || null,
-      liveTest: isLiveTest,
-      paidAmount: amountDue
+      squareReceiptUrl: data.payment.receipt_url || null
     };
     const confirmationToken = Buffer.from(JSON.stringify(confirmationData), 'utf8').toString('base64url');
     const confirmationUrl = `/confirmation.html#${confirmationToken}`;
@@ -134,8 +125,7 @@ export default async function handler(req, res) {
       amount: amountDue,
       contractVersion: CONTRACT_VERSION,
       signedBy: signature,
-      acceptedAt: signedAt,
-      liveTest: isLiveTest
+      acceptedAt: signedAt
     });
   } catch (error) {
     console.error('Square payment error', error);
