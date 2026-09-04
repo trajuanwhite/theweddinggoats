@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 
+const TAX_RATE = 0.0825;
 const PACKAGES = {
   alpine: { name: 'The Alpine', total: 300000, retainer: 90000 },
   savannah: { name: 'The Savannah', total: 360000, retainer: 108000 },
@@ -41,12 +42,15 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: 'Missing or invalid payment information.' });
   }
 
+  const tax = Math.round(selected.retainer * TAX_RATE);
+  const amountDue = selected.retainer + tax;
+
   const endpoint = environment === 'production'
     ? 'https://connect.squareup.com/v2/payments'
     : 'https://connect.squareupsandbox.com/v2/payments';
 
   const noteParts = [
-    `${selected.name} 30% wedding retainer`,
+    `${selected.name} 30% wedding retainer + 8.25% sales tax`,
     name && `Client: ${name}`,
     partnerName && `Partner: ${partnerName}`,
     weddingDate && `Wedding date: ${weddingDate}`
@@ -56,7 +60,7 @@ export default async function handler(req, res) {
     source_id: sourceId,
     idempotency_key: crypto.randomUUID(),
     amount_money: {
-      amount: selected.retainer,
+      amount: amountDue,
       currency: 'USD'
     },
     location_id: locationId,
@@ -90,7 +94,9 @@ export default async function handler(req, res) {
       status: data.payment.status,
       receiptUrl: data.payment.receipt_url || null,
       packageName: selected.name,
-      amount: selected.retainer
+      retainer: selected.retainer,
+      tax,
+      amount: amountDue
     });
   } catch (error) {
     console.error('Square payment error', error);
