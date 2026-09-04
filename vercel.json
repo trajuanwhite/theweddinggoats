@@ -14,7 +14,7 @@
     },
     {
       "source": "/payment",
-      "destination": "/payment.html"
+      "destination": "/payment-v2.html"
     }
   ]
 }
