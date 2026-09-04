@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 const TAX_RATE = 0.0825;
+const CONTRACT_VERSION = 'TWG-2026-09-03-v1';
 const PACKAGES = {
   alpine: { name: 'The Alpine', total: 300000, retainer: 90000 },
   savannah: { name: 'The Savannah', total: 360000, retainer: 108000 },
@@ -36,10 +37,18 @@ export default async function handler(req, res) {
   const name = String(body.name || '').trim().slice(0, 120);
   const partnerName = String(body.partnerName || '').trim().slice(0, 120);
   const weddingDate = String(body.weddingDate || '').trim().slice(0, 40);
+  const venue = String(body.venue || '').trim().slice(0, 180);
+  const signature = String(body.signature || '').trim().slice(0, 120);
+  const contractAccepted = body.contractAccepted === true;
+  const contractVersion = String(body.contractVersion || '').trim();
+  const acceptedAt = String(body.acceptedAt || '').trim().slice(0, 60);
 
   const selected = PACKAGES[packageKey];
   if (!sourceId || !selected) {
     return res.status(400).json({ ok: false, error: 'Missing or invalid payment information.' });
+  }
+  if (!name || !email || !weddingDate || !signature || !contractAccepted || contractVersion !== CONTRACT_VERSION) {
+    return res.status(400).json({ ok: false, error: 'Please review and electronically sign the current Wedding Videography Agreement before paying.' });
   }
 
   const tax = Math.round(selected.retainer * TAX_RATE);
@@ -51,21 +60,20 @@ export default async function handler(req, res) {
 
   const noteParts = [
     `${selected.name} 30% wedding retainer + 8.25% sales tax`,
-    name && `Client: ${name}`,
+    `Client: ${name}`,
     partnerName && `Partner: ${partnerName}`,
-    weddingDate && `Wedding date: ${weddingDate}`
+    weddingDate && `Wedding: ${weddingDate}`,
+    `Contract ${CONTRACT_VERSION} signed electronically by ${signature}`,
+    acceptedAt && `Accepted ${acceptedAt}`
   ].filter(Boolean);
 
   const squarePayload = {
     source_id: sourceId,
     idempotency_key: crypto.randomUUID(),
-    amount_money: {
-      amount: amountDue,
-      currency: 'USD'
-    },
+    amount_money: { amount: amountDue, currency: 'USD' },
     location_id: locationId,
     autocomplete: true,
-    note: noteParts.join(' | ')
+    note: noteParts.join(' | ').slice(0, 500)
   };
 
   if (email) squarePayload.buyer_email_address = email;
@@ -82,7 +90,6 @@ export default async function handler(req, res) {
     });
 
     const data = await squareResponse.json().catch(() => ({}));
-
     if (!squareResponse.ok || !data.payment) {
       const detail = data?.errors?.[0]?.detail || 'Square could not complete the payment.';
       return res.status(400).json({ ok: false, error: detail });
@@ -96,7 +103,10 @@ export default async function handler(req, res) {
       packageName: selected.name,
       retainer: selected.retainer,
       tax,
-      amount: amountDue
+      amount: amountDue,
+      contractVersion: CONTRACT_VERSION,
+      signedBy: signature,
+      acceptedAt: acceptedAt || new Date().toISOString()
     });
   } catch (error) {
     console.error('Square payment error', error);
