@@ -95,18 +95,37 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: detail });
     }
 
+    const signedAt = acceptedAt || new Date().toISOString();
+    const confirmationData = {
+      name,
+      partnerName,
+      weddingDate,
+      venue,
+      packageKey,
+      packageName: selected.name,
+      signature,
+      contractVersion: CONTRACT_VERSION,
+      acceptedAt: signedAt,
+      paymentId: data.payment.id,
+      squareReceiptUrl: data.payment.receipt_url || null
+    };
+    const confirmationToken = Buffer.from(JSON.stringify(confirmationData), 'utf8').toString('base64url');
+    const confirmationUrl = `/confirmation.html#${confirmationToken}`;
+
     return res.status(200).json({
       ok: true,
       paymentId: data.payment.id,
       status: data.payment.status,
-      receiptUrl: data.payment.receipt_url || null,
+      receiptUrl: confirmationUrl,
+      squareReceiptUrl: data.payment.receipt_url || null,
+      confirmationUrl,
       packageName: selected.name,
       retainer: selected.retainer,
       tax,
       amount: amountDue,
       contractVersion: CONTRACT_VERSION,
       signedBy: signature,
-      acceptedAt: acceptedAt || new Date().toISOString()
+      acceptedAt: signedAt
     });
   } catch (error) {
     console.error('Square payment error', error);
