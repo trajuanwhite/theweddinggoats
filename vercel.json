@@ -11,6 +11,10 @@
     {
       "source": "/films",
       "destination": "/films.html"
+    },
+    {
+      "source": "/payment",
+      "destination": "/payment.html"
     }
   ]
 }
