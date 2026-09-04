@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
   const accessToken = process.env.SQUARE_ACCESS_TOKEN;
   const locationId = process.env.SQUARE_LOCATION_ID;
-  const environment = (process.env.SQUARE_ENVIRONMENT || 'production').toLowerCase();
+  const environment = (process.env.SQUARE_ENVIRONMENT || 'sandbox').toLowerCase();
 
   if (!accessToken || !locationId) {
     return res.status(503).json({ ok: false, error: 'Square is not configured yet.' });
@@ -41,9 +41,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: 'Missing or invalid payment information.' });
   }
 
-  const endpoint = environment === 'sandbox'
-    ? 'https://connect.squareupsandbox.com/v2/payments'
-    : 'https://connect.squareup.com/v2/payments';
+  const endpoint = environment === 'production'
+    ? 'https://connect.squareup.com/v2/payments'
+    : 'https://connect.squareupsandbox.com/v2/payments';
 
   const noteParts = [
     `${selected.name} 30% wedding retainer`,
