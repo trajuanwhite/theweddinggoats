@@ -18,12 +18,12 @@
     },
     {
       "source": "/api/payment",
-      "destination": "/api/payment-with-schedule"
+      "destination": "/api/payment-with-secure-schedule"
     }
   ],
   "crons": [
     {
-      "path": "/api/balance-reminders",
+      "path": "/api/balance-reminders-secure",
       "schedule": "0 15 * * *"
     }
   ]
