@@ -1,6 +1,11 @@
 const RECIPIENTS = ['trajuan@theweddinggoats.com', 'iesha@theweddinggoats.com'];
 const SENDER = 'trajuan@theweddinggoats.com';
 
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT = 5;
+const rateBuckets = globalThis.__weddingGoatsInquiryRateBuckets || new Map();
+globalThis.__weddingGoatsInquiryRateBuckets = rateBuckets;
+
 function escapeHtml(value = '') {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -23,6 +28,74 @@ function formatDate(value) {
   }).format(d);
 }
 
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (Array.isArray(forwarded)) return forwarded[0] || 'unknown';
+  if (typeof forwarded === 'string') return forwarded.split(',')[0].trim() || 'unknown';
+  return req.headers['x-real-ip'] || 'unknown';
+}
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const recent = (rateBuckets.get(ip) || []).filter((timestamp) => now - timestamp < RATE_WINDOW_MS);
+  recent.push(now);
+  rateBuckets.set(ip, recent);
+
+  if (rateBuckets.size > 1000) {
+    for (const [key, values] of rateBuckets.entries()) {
+      const active = values.filter((timestamp) => now - timestamp < RATE_WINDOW_MS);
+      if (active.length) rateBuckets.set(key, active);
+      else rateBuckets.delete(key);
+    }
+  }
+
+  return recent.length > RATE_LIMIT;
+}
+
+function looksLikeHumanName(value) {
+  const name = clean(value);
+  if (name.length < 2 || name.length > 60) return false;
+  if (/https?:\/\/|www\.|@|\d/.test(name)) return false;
+  if (!/^[\p{L}][\p{L}\p{M}' .-]*$/u.test(name)) return false;
+
+  const compact = name.replace(/[^A-Za-z]/g, '');
+  if (compact.length >= 18) {
+    const caseTransitions = (compact.match(/[a-z][A-Z]|[A-Z][a-z]/g) || []).length;
+    if (caseTransitions >= 5) return false;
+  }
+  return true;
+}
+
+function isValidWeddingDate(value) {
+  const dateText = clean(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return false;
+
+  const wedding = new Date(`${dateText}T12:00:00Z`);
+  if (Number.isNaN(wedding.getTime())) return false;
+
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12));
+  const latest = new Date(today);
+  latest.setUTCFullYear(latest.getUTCFullYear() + 5);
+
+  return wedding >= today && wedding <= latest;
+}
+
+function isValidPhone(value) {
+  const phone = clean(value);
+  if (!phone) return true;
+  if (/https?:\/\/|www\.|@/.test(phone)) return false;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
+
+function looksSuspiciousText(value, minLength = 2) {
+  const text = clean(value);
+  if (text.length < minLength || text.length > 2000) return true;
+  if (/https?:\/\/|\[url|<a\s/i.test(text)) return true;
+  return false;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -42,20 +115,53 @@ export default async function handler(req, res) {
       planner,
       heard,
       acknowledgement,
-      website
+      website,
+      formStartedAt
     } = req.body || {};
 
     // Honeypot: silently accept bot submissions without sending email.
     if (clean(website)) return res.status(200).json({ ok: true });
+
+    const ip = getClientIp(req);
+    if (isRateLimited(ip)) {
+      return res.status(429).json({ ok: false, error: 'Too many inquiry attempts. Please try again shortly.' });
+    }
 
     const required = [yourName, partnerName, email, weddingDate, venueOrCity, vision, acknowledgement];
     if (required.some((value) => !clean(value))) {
       return res.status(400).json({ ok: false, error: 'Missing required fields' });
     }
 
-    const emailAddress = clean(email);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
+    // Most automated form spam posts immediately after the page loads.
+    const startedAt = Number(formStartedAt);
+    if (Number.isFinite(startedAt)) {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= 0 && elapsed < 2500) return res.status(200).json({ ok: true });
+    }
+
+    if (!looksLikeHumanName(yourName) || !looksLikeHumanName(partnerName)) {
+      return res.status(400).json({ ok: false, error: 'Please enter valid names' });
+    }
+
+    const emailAddress = clean(email).toLowerCase();
+    if (emailAddress.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailAddress)) {
       return res.status(400).json({ ok: false, error: 'Invalid email address' });
+    }
+
+    if (!isValidPhone(phone)) {
+      return res.status(400).json({ ok: false, error: 'Invalid phone number' });
+    }
+
+    if (!isValidWeddingDate(weddingDate)) {
+      return res.status(400).json({ ok: false, error: 'Please enter a valid upcoming wedding date' });
+    }
+
+    if (looksSuspiciousText(venueOrCity, 2) || looksSuspiciousText(vision, 10)) {
+      return res.status(400).json({ ok: false, error: 'Please check the wedding details and try again' });
+    }
+
+    if (clean(acknowledgement) !== 'Confirmed') {
+      return res.status(400).json({ ok: false, error: 'Please confirm the inquiry acknowledgement' });
     }
 
     const tenantId = process.env.MICROSOFT_TENANT_ID;
