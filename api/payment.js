@@ -61,12 +61,12 @@ function agreementSections() {
 <h3>26. Acknowledgment & Acceptance</h3><p>By signing, Client confirms that Client has reviewed this Agreement; understands the selected collection, pricing, payment schedule, and cancellation terms; has had the opportunity to ask questions; agrees to conduct this transaction electronically; and agrees to be bound by this Agreement.</p>`;
 }
 
-function buildSignedAgreement({ name, partnerName, email, weddingDate, venue, selected, signature, signedAt, paymentId, squareReceiptUrl, amountDue, tax }) {
+function buildSignedAgreement({ name, partnerName, email, weddingDate, venue, selected, signature, signedAt, paymentId, squareReceiptUrl, amountDue, tax, receipts }) {
   const fullTax = Math.round(selected.total * TAX_RATE);
   const fullTotal = selected.total + fullTax;
   const balance = fullTotal - amountDue;
   const couple = [name, partnerName].filter(Boolean).join(' + ');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Signed Wedding Videography Agreement</title><style>body{font-family:Arial,sans-serif;color:#1e1d1a;max-width:860px;margin:40px auto;line-height:1.65;padding:0 24px}h1{font-weight:400}h2{margin-top:34px}h3{margin:24px 0 6px;font-size:15px}.meta{background:#f7f3eb;padding:24px;margin:24px 0}.meta p{margin:5px 0}.sig{font-size:28px;margin:10px 0}.small{color:#6c655d;font-size:12px}</style></head><body><h1>The Wedding Goats LLC</h1><h2>Signed Wedding Videography Agreement</h2><div class="meta"><p><strong>Couple:</strong> ${escapeHtml(couple)}</p><p><strong>Client email:</strong> ${escapeHtml(email)}</p><p><strong>Wedding date:</strong> ${escapeHtml(weddingDate)}</p><p><strong>Venue / location:</strong> ${escapeHtml(venue || 'Not provided')}</p><p><strong>Collection:</strong> ${escapeHtml(selected.name)}</p><p><strong>Collection subtotal:</strong> ${money(selected.total)}</p><p><strong>Booking retainer:</strong> ${money(selected.retainer)}</p><p><strong>Sales tax paid at booking:</strong> ${money(tax)}</p><p><strong>Paid at booking:</strong> ${money(amountDue)}</p><p><strong>Remaining balance incl. tax:</strong> ${money(balance)}</p><p><strong>Square payment ID:</strong> ${escapeHtml(paymentId)}</p><p><strong>Contract version:</strong> ${CONTRACT_VERSION}</p></div><h2>Electronic Signature</h2><div class="sig">${escapeHtml(signature)}</div><p class="small">Electronically accepted on ${escapeHtml(signedAt)}.</p>${squareReceiptUrl ? `<p><a href="${escapeHtml(squareReceiptUrl)}">View Square payment receipt</a></p>` : ''}<hr>${agreementSections()}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Signed Wedding Videography Agreement</title><style>body{font-family:Arial,sans-serif;color:#1e1d1a;max-width:860px;margin:40px auto;line-height:1.65;padding:0 24px}h1{font-weight:400}h2{margin-top:34px}h3{margin:24px 0 6px;font-size:15px}.meta{background:#f7f3eb;padding:24px;margin:24px 0}.meta p{margin:5px 0}.sig{font-size:28px;margin:10px 0}.small{color:#6c655d;font-size:12px}</style></head><body><h1>The Wedding Goats LLC</h1><h2>Signed Wedding Videography Agreement</h2><div class="meta"><p><strong>Couple:</strong> ${escapeHtml(couple)}</p><p><strong>Client email:</strong> ${escapeHtml(email)}</p><p><strong>Wedding date:</strong> ${escapeHtml(weddingDate)}</p><p><strong>Venue / location:</strong> ${escapeHtml(venue || 'Not provided')}</p><p><strong>Collection:</strong> ${escapeHtml(selected.name)}</p><p><strong>Collection subtotal:</strong> ${money(selected.total)}</p><p><strong>Booking retainer:</strong> ${money(selected.retainer)}</p><p><strong>Sales tax paid at booking:</strong> ${money(tax)}</p><p><strong>Paid at booking:</strong> ${money(amountDue)}</p><p><strong>Remaining balance incl. tax:</strong> ${money(balance)}</p><p><strong>Square payment ID:</strong> ${escapeHtml(paymentId)}</p><p><strong>Contract version:</strong> ${CONTRACT_VERSION}</p></div><h2>Electronic Signature</h2><div class="sig">${escapeHtml(signature)}</div><p class="small">Electronically accepted on ${escapeHtml(signedAt)}.</p>${receipts?.length > 1 ? receipts.map((r, i) => r.url ? `<p><a href="${escapeHtml(r.url)}">Card ${i + 1} receipt — ${money(r.amount)}</a></p>` : '').join('') : ''}${squareReceiptUrl ? `<p><a href="${escapeHtml(squareReceiptUrl)}">View Square payment receipt</a></p>` : ''}<hr>${agreementSections()}</body></html>`;
 }
 
 async function emailSignedAgreement(record) {
@@ -150,6 +150,35 @@ export default async function handler(req, res) {
   const amountDue = selected.retainer + tax;
   const endpoint = environment === 'production' ? 'https://connect.squareup.com/v2/payments' : 'https://connect.squareupsandbox.com/v2/payments';
 
+  const split = body.splitPayment === true;
+  const firstAmount = Number(body.firstCardAmount);
+  const firstPaymentId = String(body.firstPaymentId || '').trim();
+  const requestId = String(body.requestId || '').trim();
+  if (split && (!Number.isSafeInteger(firstAmount) || firstAmount < 1 || firstAmount >= amountDue || !/^[a-zA-Z0-9-]{16,64}$/.test(requestId))) {
+    return res.status(400).json({ ok: false, error: 'Choose valid amounts for both cards.' });
+  }
+  const binding = crypto.createHash('sha256').update(JSON.stringify({ packageKey, name, partnerName, email, weddingDate, venue, signature, contractVersion, acceptedAt, firstAmount, requestId })).digest('hex');
+  let firstPayment = null;
+  if (split && firstPaymentId) {
+    try {
+      const firstResponse = await fetch(`${endpoint}/${encodeURIComponent(firstPaymentId)}`, { headers: { Authorization: `Bearer ${accessToken}`, 'Square-Version': '2026-08-19' } });
+      const firstData = await firstResponse.json();
+      firstPayment = firstData.payment;
+      if (!firstResponse.ok || !firstPayment || firstPayment.status !== 'COMPLETED' || firstPayment.location_id !== locationId || firstPayment.amount_money?.currency !== 'USD' || Number(firstPayment.amount_money?.amount) !== firstAmount || Number(firstPayment.refunded_money?.amount || 0) !== 0 || !String(firstPayment.note || '').startsWith(`Split booking ${binding} | Card 1 |`)) throw new Error('Invalid first payment');
+    } catch {
+      return res.status(400).json({ ok: false, error: 'We could not verify the first card payment for this booking. Please contact The Wedding Goats.' });
+    }
+  }
+  // A new attempt is authorized only after Square definitively rejects a card.
+  const retryScope = `${binding}:${firstPaymentId || 'first'}`;
+  const retryAttempt = String(body.retryAttempt || '');
+  function retrySignature(nonce) { return crypto.createHmac('sha256', accessToken).update(`split-retry:${retryScope}:${nonce}`).digest('hex'); }
+  if (split && retryAttempt) {
+    const [nonce, sig] = retryAttempt.split('.');
+    if (!/^[a-f0-9]{32}$/.test(nonce || '') || sig !== retrySignature(nonce)) return res.status(400).json({ ok: false, error: 'Invalid payment retry. Please contact The Wedding Goats.' });
+  }
+  const chargeAmount = split ? (firstPayment ? amountDue - firstAmount : firstAmount) : amountDue;
+  const splitPrefix = !split ? '' : firstPayment ? `Split first: ${firstPaymentId} | Deposit total: ${amountDue} | ` : `Split booking ${binding} | Card 1 | `;
   const noteParts = [
     `${selected.name} 30% wedding retainer + 8.25% sales tax`,
     `Client: ${name}`,
@@ -161,11 +190,11 @@ export default async function handler(req, res) {
 
   const squarePayload = {
     source_id: sourceId,
-    idempotency_key: crypto.randomUUID(),
-    amount_money: { amount: amountDue, currency: 'USD' },
+    idempotency_key: split ? crypto.createHash('sha256').update(firstPayment ? `split-second:${firstPaymentId}:${retryAttempt}` : `split-first:${requestId}:${binding}:${retryAttempt}`).digest('hex').slice(0, 45) : crypto.randomUUID(),
+    amount_money: { amount: chargeAmount, currency: 'USD' },
     location_id: locationId,
     autocomplete: true,
-    note: noteParts.join(' | ').slice(0, 500)
+    note: (splitPrefix + noteParts.join(' | ')).slice(0, 500)
   };
   if (email) squarePayload.buyer_email_address = email;
 
@@ -179,17 +208,28 @@ export default async function handler(req, res) {
     const data = await squareResponse.json().catch(() => ({}));
     if (!squareResponse.ok || !data.payment) {
       const detail = data?.errors?.[0]?.detail || 'Square could not complete the payment.';
-      return res.status(400).json({ ok: false, error: detail });
+      const declined = ['CARD_DECLINED', 'GENERIC_DECLINE', 'INSUFFICIENT_FUNDS', 'CVV_FAILURE', 'ADDRESS_VERIFICATION_FAILURE', 'CARD_EXPIRED', 'INVALID_CARD', 'INVALID_CARD_DATA'].includes(data?.errors?.[0]?.code);
+      let nextRetryAttempt;
+      if (split && declined) { const nonce = crypto.createHmac('sha256', accessToken).update(`next-split-retry:${retryScope}:${retryAttempt}`).digest('hex').slice(0, 32); nextRetryAttempt = `${nonce}.${retrySignature(nonce)}`; }
+      return res.status(squareResponse.status >= 500 ? 503 : 400).json({ ok: false, error: detail, nextRetryAttempt });
     }
 
+    if (data.payment.status !== 'COMPLETED') {
+      return res.status(400).json({ ok: false, error: 'Payment is not completed. Please contact The Wedding Goats before retrying.' });
+    }
+    if (split && !firstPayment) {
+      return res.status(200).json({ ok: true, partial: true, firstPaymentId: data.payment.id, paidAmount: firstAmount, remainingAmount: amountDue - firstAmount });
+    }
+    const paymentIds = firstPayment ? [firstPayment.id, data.payment.id] : [data.payment.id];
+    const receipts = [firstPayment, data.payment].filter(Boolean).map(p => ({ paymentId: p.id, amount: Number(p.amount_money.amount), url: p.receipt_url || null }));
     const signedAt = acceptedAt || new Date().toISOString();
-    const confirmationData = { name, partnerName, weddingDate, venue, packageKey, packageName: selected.name, signature, contractVersion: CONTRACT_VERSION, acceptedAt: signedAt, paymentId: data.payment.id, squareReceiptUrl: data.payment.receipt_url || null };
+    const confirmationData = { name, partnerName, weddingDate, venue, packageKey, packageName: selected.name, signature, contractVersion: CONTRACT_VERSION, acceptedAt: signedAt, paymentId: paymentIds.join(', '), receipts, squareReceiptUrl: data.payment.receipt_url || null };
     const confirmationToken = Buffer.from(JSON.stringify(confirmationData), 'utf8').toString('base64url');
     const confirmationUrl = `/confirmation.html#${confirmationToken}`;
 
     let archiveEmailSent = false;
     try {
-      archiveEmailSent = await emailSignedAgreement({ name, partnerName, email, weddingDate, venue, selected, signature, signedAt, paymentId: data.payment.id, squareReceiptUrl: data.payment.receipt_url || null, amountDue, tax });
+      archiveEmailSent = await emailSignedAgreement({ name, partnerName, email, weddingDate, venue, selected, signature, signedAt, paymentId: paymentIds.join(', '), squareReceiptUrl: data.payment.receipt_url || null, amountDue, tax, receipts });
       if (!archiveEmailSent) console.error('Signed agreement archive email was not sent');
     } catch (archiveError) {
       console.error('Signed agreement archive error', archiveError?.message || archiveError);

@@ -40,6 +40,7 @@ async function getOriginalPayment({ accessToken, environment, paymentId }) {
 }
 
 function verifiedBooking(payment, email, locationId) {
+  if (/^Split booking /.test(payment.note || '')) throw new Error('Use the final card payment ID after completing both deposit payments.');
   if (payment.location_id !== locationId) throw new Error('This payment does not belong to this Wedding Goats account.');
   if (payment.status !== 'COMPLETED') throw new Error('The original retainer payment is not completed.');
 
@@ -93,6 +94,12 @@ export default async function handler(req, res) {
 
   try {
     const original = await getOriginalPayment({ accessToken, environment, paymentId });
+    const splitMatch = String(original.note || '').match(/^Split first: ([^|]+) \| Deposit total: (\d+) \|/);
+    if (splitMatch) {
+      const first = await getOriginalPayment({ accessToken, environment, paymentId: splitMatch[1].trim() });
+      if (first.status !== 'COMPLETED' || first.location_id !== locationId || first.buyer_email_address !== original.buyer_email_address || !/^Split booking [a-f0-9]{64} \| Card 1 \|/.test(first.note || '') || Number(first.refunded_money?.amount || 0) || Number(original.refunded_money?.amount || 0) || first.amount_money?.currency !== 'USD' || original.amount_money?.currency !== 'USD' || Number(first.amount_money.amount) + Number(original.amount_money.amount) !== Number(splitMatch[2])) throw new Error('The split retainer could not be verified.');
+      original.amount_money = { ...original.amount_money, amount: Number(splitMatch[2]) };
+    }
     const booking = verifiedBooking(original, email, locationId);
 
     if (action === 'lookup') {

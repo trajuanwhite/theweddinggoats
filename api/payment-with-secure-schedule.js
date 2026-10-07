@@ -119,7 +119,7 @@ export default async function handler(req, res) {
     setHeader: (...args) => res.setHeader(...args),
     status(code) { statusCode = code; return this; },
     async json(payload) {
-      if (statusCode >= 200 && statusCode < 300 && payload?.ok && payload?.paymentId) {
+      if (statusCode >= 200 && statusCode < 300 && payload?.ok && !payload?.partial && payload?.paymentId) {
         try {
           await sendPaymentSchedule({
             name: String(requestBody.name || '').trim(),

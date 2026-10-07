@@ -144,11 +144,11 @@ export default async function handler(req, res) {
     const dueBookings = [];
     for (const payment of payments) {
       if (payment.status !== 'COMPLETED' || completedBalanceFor.has(payment.id)) continue;
-      const amount = Number(payment?.amount_money?.amount || 0);
+      const amount = Number(String(payment.note || '').match(/^Split first: [^|]+ \| Deposit total: (\d+) \|/)?.[1] || payment?.amount_money?.amount || 0);
       const pkg = packageFromRetainerAmount(amount);
       if (!pkg) continue;
       const note = String(payment.note || '');
-      if (!/30% wedding retainer/i.test(note)) continue;
+      if (/^Split booking /.test(note) || !/30% wedding retainer/i.test(note)) continue;
       const weddingMatch = note.match(/Wedding:\s*([^|]+)/i);
       if (!weddingMatch || weddingMatch[1].trim() !== targetWeddingDate) continue;
       const email = String(payment.buyer_email_address || '').trim();
