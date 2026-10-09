@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/hashtags",
+      "destination": "/hashtags.html"
+    },
+    {
       "source": "/detailsform",
       "destination": "/detailsform.html"
     },
