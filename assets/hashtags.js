@@ -1,8 +1,8 @@
 (function(){
 'use strict';
 function clean(value){return value.normalize('NFKD').replace(/\p{M}/gu,'').split(/[\s’-]+/).map(part=>part.charAt(0).toUpperCase()+part.slice(1)).join('').replace(/[^\p{L}\p{N}]/gu,'');}
-function generate(last,first,partner,year){
-const n=clean(last),a=clean(first),b=clean(partner),y=/^\d{4}$/.test(year)?year:'';
+function generate(last,first,partner,year,currentLast=''){
+const n=clean(last),a=clean(first),b=clean(partner),y=/^\d{4}$/.test(year)?year:'',current=clean(currentLast);
 if(!n||!/[\p{L}]/u.test(n))return [];
 const wordplay={
 white:['WhiteOnTime','WhiteWhereWeBelong','TheWhiteMove','WhitePlaceWhiteTime','TheWhiteTieAffair'],
@@ -74,6 +74,11 @@ const specific=wordplay[n.toLowerCase()]||[];
 const groups={Wordplay:[...specific],Modern:[`${n}MadeItOfficial`,`The${n}Afterparty`,`${n}SignedAndSealed`,`The${n}Takeover`,`${n}InGoodCompany`,`${n}NoPlusOneNeeded`,`${n}PlotTwist`,`The${n}MainEvent`],Understated:[`The${n}Chapter`,`HouseOf${n}`,`Simply${n}`,`${n}OnFilm`,`${n}InTheMaking`,`${n}Together`,`${n}FromHere`,`${n}AtLast`]};
 // Only offer wordplay that fits this name; unfamiliar names get stronger neutral ideas.
 if(!specific.length){const letter=n[0].toUpperCase();const alliteration={A:'AllIn',B:'BeyondTheVows',C:'ChapterOne',D:'DoneDeal',E:'Endgame',F:'ForKeeps',G:'GoingAllIn',H:'HereToStay',I:'InGoodCompany',J:'JustUs',K:'ForKeeps',L:'LockedIn',M:'MadeItOfficial',N:'NextChapter',O:'OnTheRecord',P:'PartyOfTwo',Q:'QuiteTheCouple',R:'RingAndRepeat',S:'SignedAndSealed',T:'TheTakeover',U:'UsFromHere',V:'VowsAndVictory',W:'WorthTheWait',Y:'YesToUs',Z:'ZeroDoubts'};if(alliteration[letter])groups.Modern.unshift(`${n}${alliteration[letter]}`);}
+if(current&&/[\p{L}]/u.test(current)&&current.toLowerCase()!==n.toLowerCase()){
+groups.Modern.unshift(`${current}To${n}`,`From${current}To${n}`,`${current}Meets${n}`,`${current}And${n}MadeItOfficial`);
+groups.Understated.unshift(`${current}And${n}`,`The${current}${n}Chapter`);
+if(y)groups.Understated.unshift(`${current}And${n}${y}`);
+}
 if(a&&b){groups.Modern.unshift(`${a}And${b}MadeItOfficial`,`${a}And${b}ForThePlot`);groups.Understated.unshift(`${a}And${b}OnFilm`,`${a}And${b}FromHere`);}
 if(y){groups.Understated.unshift(`${n}${y}`,`The${n}Chapter${y}`);if(specific.length)groups.Wordplay.push(`${specific[0]}${y}`);}
 
@@ -84,6 +89,6 @@ if(typeof document==='undefined')return;
 const form=document.getElementById('generator'),results=document.getElementById('results'),cards=document.getElementById('cards'),status=document.getElementById('status');let ideas=[],style='All',page=0;
 function render(){cards.replaceChildren();const pool=ideas.filter(x=>style==='All'||x.style===style);let chosen;if(!pool.length){const note=document.createElement('p');note.className='tip';note.textContent='No natural wordplay for this name yet. Try Modern or Understated for your shortlist.';cards.append(note);return;}if(style==='All'){const order=['Wordplay','Modern','Understated'];const ranked=order.flatMap(s=>pool.filter(x=>x.style===s));const offset=(page*8)%ranked.length;chosen=ranked.slice(offset,offset+8);if(chosen.length<8)chosen.push(...ranked.slice(0,8-chosen.length));}else chosen=Array.from({length:Math.min(8,pool.length)},(_,i)=>pool[(page*8+i)%pool.length]);
 chosen.forEach(item=>{const card=document.createElement('article');card.className='hashtag';const content=document.createElement('div'),tag=document.createElement('strong'),category=document.createElement('small'),button=document.createElement('button');tag.textContent=item.tag;category.textContent=item.style;content.append(tag,category);button.type='button';button.className='copy';button.textContent='Copy';button.setAttribute('aria-label','Copy '+item.tag);button.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(item.tag);status.textContent='Copied '+item.tag;button.textContent='Copied!';setTimeout(()=>button.textContent='Copy',1800);}catch{status.textContent='Select and copy your hashtag: '+item.tag;const range=document.createRange();range.selectNodeContents(tag);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}});card.append(content,button);cards.append(card);});}
-form.addEventListener('submit',event=>{event.preventDefault();ideas=generate(document.getElementById('lastName').value,document.getElementById('firstName').value,document.getElementById('partnerName').value,document.getElementById('year').value);if(!ideas.length){results.hidden=true;status.textContent='Enter a last name containing letters to get started.';return;}page=0;results.hidden=false;render();status.textContent='Your hashtags are ready.';results.scrollIntoView({behavior:'smooth',block:'start'});});
+form.addEventListener('submit',event=>{event.preventDefault();ideas=generate(document.getElementById('lastName').value,document.getElementById('firstName').value,document.getElementById('partnerName').value,document.getElementById('year').value,document.getElementById('currentLastName').value);if(!ideas.length){results.hidden=true;status.textContent='Enter a last name containing letters to get started.';return;}page=0;results.hidden=false;render();status.textContent='Your hashtags are ready.';results.scrollIntoView({behavior:'smooth',block:'start'});});
 document.querySelectorAll('[data-style]').forEach(button=>button.addEventListener('click',()=>{style=button.dataset.style;page=0;document.querySelectorAll('[data-style]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));render();}));document.getElementById('more').addEventListener('click',()=>{page++;render();status.textContent='Here are more ideas for your name.';});
 })();
